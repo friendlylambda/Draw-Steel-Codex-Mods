@@ -7,29 +7,32 @@ local mod = dmhub.GetModLoading()
 local BREAK_DOC_ID = "breaktime:state"
 
 --------------------------------------------------------------------------------
--- THEME COLORS
+-- THEMING
 --------------------------------------------------------------------------------
--- Pull semantic colors from DMHub's global Styles palette (the active theme)
--- instead of hardcoding hex values, and apply them inline on each element so
--- they render correctly everywhere -- including the modal dialog and the
--- full-screen overlay, which live outside any themed container and so do not
--- pick up registered panel themes. Resolved lazily so the Styles global is
--- guaranteed loaded by the time the UI is built. Re-theme by editing this table.
-
-local _theme = nil
-local function Theme()
-    if _theme == nil then
-        -- Bound ONLY to DMHub's semantic color tokens (no palette swatches like
-        -- Gold/Grey/Cream, which are fixed and do not track the active theme).
-        -- Re-theme by editing this table.
-        _theme = {
-            surface = Styles.backgroundColor,   -- neutral panel background
-            text    = Styles.textColor,         -- primary text / neutral state
-            active  = Styles.ModifierBuffColor, -- "back"/ready + "Break is Over!"
-        }
-    end
-    return _theme
-end
+-- This UI is fully driven by the Codex Theme Engine. The rules:
+--
+--  1. NEVER use inline color/bgcolor/borderColor. Apply theme CLASS names
+--     (label, number, bold, success, fgMuted, bgSuccess, bgFgMuted,
+--     framedPanel, modalTitle, modalMessage, sizeS/M/L, closeButton, ...) so
+--     every element tracks the user's active theme and color scheme.
+--  2. A panel only resolves theme classes if it (or an ancestor) owns the
+--     theme cascade via `styles = ThemeEngine.GetStyles()`. The cascade is a
+--     one-shot snapshot and is NOT inherited across separately mounted panels.
+--       - The dockable panels are mounted INSIDE DockablePanel's dock, which
+--         already owns a GetStyles() cascade and re-applies it on theme change.
+--         So the dockable content INHERITS the cascade and must NOT re-declare
+--         its own GetStyles() (re-declaring is a large per-panel perf hit and
+--         is redundant) -- it just uses classes.
+--       - The modal (gui.ShowModal) and the full-screen overlay (mounted on
+--         GameHud.dialogWorldPanel) live OUTSIDE any themed container, so each
+--         must own its own `styles = ThemeEngine.GetStyles()` cascade root.
+--  3. The overlay persists across the session, so it subscribes to
+--     ThemeEngine.OnThemeChanged and re-assigns its styles to recolor live.
+--     The modal is transient (re-themes next time it opens) so it does not.
+--
+-- Intentional non-theme color: the overlay's full-screen scrim stays a fixed
+-- translucent black (#00000066). It is a backdrop dimmer, not a UI surface, so
+-- it is deliberately scheme-independent.
 
 --------------------------------------------------------------------------------
 -- DOCUMENT ACCESS
@@ -123,12 +126,11 @@ end
 local function ShowBreakDurationDialog()
     local minutesInput = 5  -- Default 5 minutes
 
+    -- Numeric stepper readout: themed number font inside a themed border.
     local inputLabel = gui.Label{
-        classes = {"framedPanel"},
-        styles = { Styles.Panel },
+        classes = {"number", "bordered"},
         text = "5",
         fontSize = 24,
-        color = Theme().text,
         width = 60,
         height = 40,
         halign = "center",
@@ -137,12 +139,12 @@ local function ShowBreakDurationDialog()
     }
 
     local decreaseButton = gui.Button{
+        classes = {"sizeM"},
         width = 40,
         height = 40,
         halign = "center",
         valign = "center",
         text = "-",
-        fontSize = 24,
 
         click = function(element)
             minutesInput = math.max(1, minutesInput - 1)
@@ -151,12 +153,12 @@ local function ShowBreakDurationDialog()
     }
 
     local increaseButton = gui.Button{
+        classes = {"sizeM"},
         width = 40,
         height = 40,
         halign = "center",
         valign = "center",
         text = "+",
-        fontSize = 24,
 
         click = function(element)
             minutesInput = math.min(60, minutesInput + 1)
@@ -164,41 +166,31 @@ local function ShowBreakDurationDialog()
         end,
     }
 
+    -- This modal lives outside any themed container, so it owns its own
+    -- cascade root via ThemeEngine.GetStyles().
     local dialogPanel = gui.Panel{
         classes = {"framedPanel"},
-        width = 300,
-        height = 200,
+        styles = ThemeEngine.GetStyles(),
+        width = 320,
+        height = "auto",
         halign = "center",
         valign = "center",
         flow = "vertical",
         vpad = 16,
         hpad = 16,
 
-        styles = {
-            Styles.Panel,
-        },
-
         -- Title
         gui.Label{
+            classes = {"modalTitle"},
             text = "Start Break",
-            fontSize = 20,
-            bold = true,
-            color = Theme().text,
-            width = "100%",
-            height = "auto",
-            halign = "center",
-            textAlignment = "center",
+            fontSize = 22,
             vmargin = 8,
         },
 
         -- Minutes label
         gui.Label{
+            classes = {"modalMessage"},
             text = "Duration (minutes):",
-            fontSize = 14,
-            color = Theme().text,
-            width = "100%",
-            height = "auto",
-            halign = "center",
             textAlignment = "center",
             vmargin = 8,
         },
@@ -228,11 +220,11 @@ local function ShowBreakDurationDialog()
 
             -- Cancel button
             gui.Button{
+                classes = {"sizeM"},
                 width = 100,
                 height = 36,
                 hmargin = 8,
                 text = "Cancel",
-                fontSize = 14,
 
                 click = function(element)
                     gui.CloseModal()
@@ -241,11 +233,11 @@ local function ShowBreakDurationDialog()
 
             -- Start button
             gui.Button{
+                classes = {"sizeM"},
                 width = 100,
                 height = 36,
                 hmargin = 8,
                 text = "Start",
-                fontSize = 14,
 
                 click = function(element)
                     StartBreak(minutesInput)
@@ -255,7 +247,9 @@ local function ShowBreakDurationDialog()
         },
 
         -- Close button (X)
-        gui.CloseButton{
+        gui.Button{
+            classes = {"closeButton"},
+            floating = true,
             halign = "right",
             valign = "top",
             escapePriority = EscapePriority.EXIT_MODAL_DIALOG,
@@ -293,29 +287,28 @@ local function CreatePlayerStatusRow(userid)
         },
 
         children = {
-            -- Status indicator dot (active = ready, neutral = away)
+            -- Status indicator dot: themed-green fill when back, muted fill when away.
             gui.Panel{
-                bgcolor = isBack and Theme().active or Theme().text,
+                classes = isBack and {"bgSuccess"} or {"bgFgMuted"},
                 width = 12,
                 height = 12,
                 cornerRadius = 6,
                 valign = "center",
                 hmargin = 4,
             },
-            -- Name label
+            -- Name label (themed label color)
             gui.Label{
                 text = displayName,
                 fontSize = 14,
-                color = Theme().text,
                 width = 120,
                 height = "auto",
                 valign = "center",
             },
-            -- Status text label (active when back, neutral when away)
+            -- Status text label (themed success when back, muted when away)
             gui.Label{
+                classes = isBack and {"success"} or {"fgMuted"},
                 text = isBack and "Back" or "Away",
                 fontSize = 12,
-                color = isBack and Theme().active or Theme().text,
                 width = "auto",
                 height = "auto",
                 valign = "center",
@@ -329,13 +322,12 @@ local function CreateBreakPanel()
     local lastUserHash = ""
     local lastStatusHash = ""
 
-    -- Timer display (large, centered)
+    -- Timer display (large, centered, themed number font)
     local timerLabel = gui.Label{
         id = "gmTimerLabel",
+        classes = {"number", "bold"},
         text = "0:00",
-        color = Theme().text,
         fontSize = 32,
-        bold = true,
         width = "100%",
         height = "auto",
         halign = "center",
@@ -355,6 +347,7 @@ local function CreateBreakPanel()
     -- Start Break button
     local startButton = gui.Button{
         id = "startButton",
+        classes = {"sizeM"},
         width = "auto",
         height = 40,
         halign = "center",
@@ -362,7 +355,6 @@ local function CreateBreakPanel()
         hmargin = 8,
         hpad = 16,
         text = "Start Break",
-        fontSize = 16,
 
         click = function(element)
             ShowBreakDurationDialog()
@@ -372,6 +364,7 @@ local function CreateBreakPanel()
     -- End Break button
     local endButton = gui.Button{
         id = "endButton",
+        classes = {"sizeM"},
         width = "auto",
         height = 40,
         halign = "center",
@@ -379,7 +372,6 @@ local function CreateBreakPanel()
         hmargin = 8,
         hpad = 16,
         text = "End Break",
-        fontSize = 16,
 
         click = function(element)
             EndBreak()
@@ -396,7 +388,11 @@ local function CreateBreakPanel()
         return table.concat(parts, ",")
     end
 
-    -- Main panel
+    -- Main panel. Mounted inside DockablePanel's dock, which already owns a
+    -- ThemeEngine.GetStyles() cascade and re-applies it on theme change, so
+    -- this content INHERITS the cascade -- it must NOT declare its own
+    -- GetStyles() (redundant + a per-panel perf hit). Classes resolve via the
+    -- inherited cascade and recolor live for free.
     local mainPanel = gui.Panel{
         width = "100%",
         height = "auto",
@@ -475,10 +471,10 @@ local function CreatePlayerBreakPanel()
         vmargin = 8,
     }
 
-    -- "No break active" message
+    -- "No break active" message (themed muted text)
     local noBreakLabel = gui.Label{
+        classes = {"fgMuted"},
         text = "No break active",
-        color = Theme().text,
         fontSize = 14,
         width = "100%",
         height = "auto",
@@ -497,6 +493,7 @@ local function CreatePlayerBreakPanel()
         return table.concat(parts, ",")
     end
 
+    -- Inherits the dock's theme cascade (see CreateBreakPanel note).
     local mainPanel = gui.Panel{
         width = "100%",
         height = "auto",
@@ -558,10 +555,9 @@ local function CreateBreakOverlay()
 
     -- Create elements as locals for closure access
     local timerLabel = gui.Label{
+        classes = {"number", "bold"},
         text = "0:00",
-        color = Theme().text,
         fontSize = 72,
-        bold = true,
         width = 200,
         height = "auto",
         halign = "center",
@@ -570,11 +566,9 @@ local function CreateBreakOverlay()
     }
 
     local breakOverLabel = gui.Label{
-        classes = {"collapsed"},
+        classes = {"success", "bold", "collapsed"},
         text = "Break is Over!",
-        color = Theme().active,
         fontSize = 28,
-        bold = true,
         width = "auto",
         height = "auto",
         halign = "center",
@@ -583,12 +577,12 @@ local function CreateBreakOverlay()
     }
 
     local toggleButton = gui.Button{
+        classes = {"sizeL"},
         width = 200,
         height = 50,
         halign = "center",
         vmargin = 16,
         text = "I'm Back",
-        fontSize = 18,
 
         click = function(element)
             ToggleMyStatus()
@@ -596,10 +590,10 @@ local function CreateBreakOverlay()
     }
 
     local minimizeButton = gui.Button{
+        classes = {"sizeS"},
         width = 28,
         height = 28,
         text = "-",
-        fontSize = 14,
         bold = true,
         vmargin = -2,
 
@@ -615,6 +609,8 @@ local function CreateBreakOverlay()
         end,
     }
 
+    -- Framed content card. Child of the overlay cascade root below, so its
+    -- framedPanel/etc. classes resolve via the inherited cascade.
     local contentPanel = gui.Panel{
         classes = {"framedPanel"},
         width = 400,
@@ -630,10 +626,6 @@ local function CreateBreakOverlay()
         constrainToScreen = true,
         x = 0,
         y = 0,
-
-        styles = {
-            Styles.Panel,
-        },
 
         events = {
             drag = function(element)
@@ -654,10 +646,8 @@ local function CreateBreakOverlay()
                     minimizeButton,
                     -- Center title (352 - 28 button = 324)
                     gui.Label{
+                        classes = {"sizeL", "bold"},
                         text = "Break Time",
-                        fontSize = 20,
-                        bold = true,
-                        color = Theme().text,
                         width = 324,
                         height = 28,
                         halign = "center",
@@ -672,28 +662,25 @@ local function CreateBreakOverlay()
         },
     }
 
-    -- Main overlay panel (full screen)
+    -- Main overlay panel (full screen). Mounted on GameHud.dialogWorldPanel,
+    -- OUTSIDE any themed container, so it owns its own cascade root via
+    -- ThemeEngine.GetStyles(). The "hidden" class it toggles is itself a theme
+    -- utility class, so no custom styles block is needed.
     local overlayPanel = gui.Panel{
         classes = {"breakOverlay", "hidden"},
+        styles = ThemeEngine.GetStyles(),
         width = "100%",
         height = "100%",
         halign = "center",
         valign = "center",
         floating = true,
         interactable = true,
-        -- Semi-transparent black scrim dimming the map; this is an intentional
-        -- backdrop, not a theme color, so it stays a fixed translucent black.
+        -- Intentional fixed translucent-black scrim dimming the map; this is a
+        -- backdrop, not a theme surface, so it stays scheme-independent.
         bgcolor = "#00000066",
 
         monitorGame = doc.path,
         thinkTime = 1,
-
-        styles = {
-            {
-                selectors = {"hidden"},
-                collapsed = 1,
-            },
-        },
 
         events = {
             refreshGame = function(element)
@@ -709,6 +696,15 @@ local function CreateBreakOverlay()
                         contentPanel.y = 0
                         isMinimized = false
                         minimizeButton.text = "-"
+
+                        -- Re-resolve the theme cascade each time the overlay
+                        -- becomes visible. The overlay is built once at
+                        -- EnterGame, where the active theme may not be resolved
+                        -- yet, so its initial snapshot can be the default
+                        -- (white-on-black). Reassigning here guarantees it
+                        -- always reflects the user's current theme when shown,
+                        -- regardless of what was active at game-entry.
+                        element.styles = ThemeEngine.GetStyles()
                     end
 
                     -- Update timer via closure
@@ -739,6 +735,15 @@ local function CreateBreakOverlay()
         },
     }
 
+    -- The overlay persists for the whole session, so recolor it live when the
+    -- user switches theme or color scheme. mod is passed so this auto-
+    -- deregisters on mod unload.
+    ThemeEngine.OnThemeChanged(mod, function()
+        if overlayPanel ~= nil and overlayPanel.valid then
+            overlayPanel.styles = ThemeEngine.GetStyles()
+        end
+    end)
+
     return overlayPanel
 end
 
@@ -766,6 +771,17 @@ dmhub.RegisterEventHandler("EnterGame", function()
         if not breakOverlayAdded then
             local breakOverlay = CreateBreakOverlay()
             GameHud.instance.dialogWorldPanel:AddChild(breakOverlay)
+
+            -- Re-resolve the theme cascade now that the overlay is attached to
+            -- the live HUD tree. Styles assigned to a DETACHED panel at
+            -- construction resolve without a live parent context, so the
+            -- children fall back to unthemed defaults (the "black and white"
+            -- look). Reassigning styles on the now-attached root forces a
+            -- re-cascade against the active theme -- the same mechanism
+            -- OnThemeChanged uses for live recoloring. (Core overlays like
+            -- DSVictoryScreen sidestep this by being mounted at HUD
+            -- construction; a mod can only attach late, so we re-resolve here.)
+            breakOverlay.styles = ThemeEngine.GetStyles()
             breakOverlayAdded = true
         end
     end)
