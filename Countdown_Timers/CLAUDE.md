@@ -2,7 +2,7 @@
 
 ## What This Mod Does
 
-Configurable countdown timers for DMHub. The GM creates named timers with a duration in minutes, then triggers them manually by clicking. Running timers display as overlay notifications (visible to all players) in the upper-right corner, counting down in real time. When a timer expires it shows "TIME'S UP" until the GM resets it.
+Configurable countdown timers for DMHub. The GM creates named timers with a duration, then triggers them manually by clicking. Running timers display as overlay notifications (visible to all players) in the upper-right corner, counting down in real time. When a timer expires it shows "TIME'S UP" until the GM resets it.
 
 ## Architecture
 
@@ -13,14 +13,14 @@ Single file mod: `Main.lua`
 - **Document System** (`timers:state`) - Stores all timer data: labels, durations, trigger type, and runtime end times. Synced across all clients.
 - **DockablePanel** ("Countdown Timers", GM-only) - Sidebar panel showing a grid of timer cells. Each displays the duration (idle), live countdown (running), or "Done!" (expired). Click the visual to start/stop. Click the label to edit. Plus button to add new timers.
 - **Countdown Overlay** - Attached to `dialogWorldPanel` (above map, below modals). Shows all running/expired timers as stacked notification cards in the upper-right corner. Visible to all players. Updates every second via `thinkTime`.
-- **Edit Dialog** - Modal for GM to rename timers, change duration (1-120 minutes), or delete.
+- **Edit Dialog** - Modal for GM to rename timers, change duration (30 seconds to 120 minutes, in 30-second steps), or delete.
 
 ### Data Model
 
 ```lua
 doc.data.timers[timerId] = {
     label = "Short Rest",       -- Display name
-    durationMinutes = 10,       -- Configured duration
+    durationSeconds = 600,      -- Configured duration in seconds (30-7200, 30s steps; new timers default 60)
     triggerType = "manual",     -- Trigger condition (only "manual" for now)
     endTime = nil,              -- dmhub.serverTime when timer expires; nil = not running
 }
@@ -36,15 +36,18 @@ doc.data.nextId = 2
 - **`thinkTime = 1`** on both panel and overlay for per-second countdown updates
 - **`dmhub.serverTime`** for all timing (synchronized across clients)
 - **GameHud EnterGame coroutine** for overlay attachment (same pattern as Safety Cards)
-- **Closure pattern** for reliable element updates (avoids Styles.Panel/:Get() conflicts)
+- **Closure pattern** for reliable element updates
+- **Codex Theme Engine** - UI is fully themed via class names (no inline colors). The modal and the overlay each own a `ThemeEngine.GetStyles()` cascade root; the dockable content inherits the dock's cascade. The overlay re-resolves its styles after `AddChild`, on `OnThemeChanged`, and on each hidden->visible transition. Status colors via composition classes; note a composition class can recolor a `gui.Panel`/`gui.Label` but NOT a `gui.Button` (the `{label,button}` base rule out-specifies it), which is why the stop control is a panel.
 
 ### Timer States
 
-| State | Panel Display | Overlay | Colors |
-|-------|--------------|---------|--------|
-| Idle | Duration (e.g. "10m") | Hidden | Gray bg, gray border |
-| Running | Countdown (e.g. "5:23") | Visible with countdown | Green bg, green border |
-| Expired | "Done!" | Visible with "TIME'S UP" | Red bg, red border |
+Colors are theme-driven (Codex Theme Engine), not hardcoded -- they track the user's active color scheme. State maps to a semantic status token:
+
+| State | Panel Display | Overlay | Status color |
+|-------|--------------|---------|--------------|
+| Idle | Duration (e.g. "10m") | Hidden | Neutral (`@border`) |
+| Running | Countdown (e.g. "5:23") | Visible with countdown | Success / green (`borderSuccess` cell, `bgSuccess` bar) |
+| Expired | "Done!" | Visible with "TIME'S UP" | Danger / red (`borderDanger` cell, `bgDanger` bar + `danger` text) |
 
 ### GM Interactions (Panel)
 

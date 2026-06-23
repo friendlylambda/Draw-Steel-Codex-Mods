@@ -14,6 +14,41 @@ end
 
 local TIMERS_DOC_ID = "timers:state"
 
+--------------------------------------------------------------------------------
+-- THEMING
+--------------------------------------------------------------------------------
+-- This UI is fully driven by the Codex Theme Engine (see ThemeEngine.md /
+-- CreatingThemes.md / DefaultStyles.lua in ~/draw-steel-codex). Rules:
+--
+--  1. NEVER inline color/bgcolor/borderColor. Apply theme CLASS names so every
+--     element tracks the user's active theme + color scheme. Inline sizes /
+--     layout are fine; only inline COLORS are banned.
+--  2. A panel resolves theme classes only if it (or an ancestor) owns the
+--     cascade via `styles = ThemeEngine.GetStyles()`. The cascade is a one-shot
+--     snapshot and is NOT inherited across separately mounted panels.
+--       - The dockable panel is mounted inside DockablePanel's dock, which
+--         already owns a GetStyles() cascade and re-applies it on theme change,
+--         so its content INHERITS the cascade and must NOT re-declare its own
+--         GetStyles() (redundant + a per-panel perf hit).
+--       - The edit modal (gui.ShowModal) and the countdown overlay (mounted on
+--         GameHud.dialogWorldPanel) live OUTSIDE any container, so each owns its
+--         own GetStyles() cascade root.
+--  3. The overlay persists across the session, so it subscribes to
+--     ThemeEngine.OnThemeChanged and re-resolves its styles for live recoloring.
+--
+-- Status-color mapping: idle = neutral (@border), running = success (green),
+-- expired = danger (red).
+--
+-- IMPORTANT cascade gotcha: composition classes (bgSuccess / danger / etc.) are
+-- single-selector rules. The base button rule is a 2-selector compound
+-- ({label,button}) and OUT-specifies them, so a composition class CANNOT recolor
+-- a button's surface/text. It works on panels and labels (single-selector base),
+-- though. That's why the red "stop" control is a gui.Panel (not a button).
+
+--------------------------------------------------------------------------------
+-- ACTIVE PANEL REFERENCE
+--------------------------------------------------------------------------------
+
 -- Reference to the active timers panel for manual refresh
 local activeTimersPanel = nil
 
@@ -196,7 +231,7 @@ local function ShowEditTimerDialog(timerId)
     local labelInput = timer.label
     local durationInput = timer.durationSeconds
 
-    -- Label input field
+    -- Label input field (themed via the modal's cascade root)
     local labelField = gui.Input{
         width = 200,
         height = 32,
@@ -209,8 +244,9 @@ local function ShowEditTimerDialog(timerId)
         end,
     }
 
-    -- Duration display label
+    -- Duration display: themed bordered surface (no inline colors)
     local durationLabel = gui.Label{
+        classes = {"bordered"},
         text = FormatDuration(durationInput),
         fontSize = 24,
         width = 140,
@@ -218,9 +254,6 @@ local function ShowEditTimerDialog(timerId)
         halign = "center",
         valign = "center",
         textAlignment = "center",
-        bgcolor = "#333333",
-        borderWidth = 1,
-        borderColor = "#666666",
     }
 
     local decreaseButton = gui.Button{
@@ -229,8 +262,8 @@ local function ShowEditTimerDialog(timerId)
         halign = "center",
         valign = "center",
         hmargin = 4,
-        text = "-",
         fontSize = 24,
+        text = "-",
 
         click = function(element)
             durationInput = math.max(30, durationInput - 30)
@@ -244,8 +277,8 @@ local function ShowEditTimerDialog(timerId)
         halign = "center",
         valign = "center",
         hmargin = 4,
-        text = "+",
         fontSize = 24,
+        text = "+",
 
         click = function(element)
             durationInput = math.min(7200, durationInput + 30)
@@ -253,8 +286,11 @@ local function ShowEditTimerDialog(timerId)
         end,
     }
 
+    -- This modal lives outside any themed container, so it owns its cascade
+    -- root via ThemeEngine.GetStyles().
     local dialogPanel = gui.Panel{
         classes = {"framedPanel"},
+        styles = ThemeEngine.GetStyles(),
         width = 320,
         height = "auto",
         halign = "center",
@@ -263,29 +299,20 @@ local function ShowEditTimerDialog(timerId)
         vpad = 16,
         hpad = 16,
 
-        styles = {
-            Styles.Panel,
-        },
-
         -- Title
         gui.Label{
+            classes = {"modalTitle"},
             text = "Edit Timer",
             fontSize = 20,
-            bold = true,
-            width = "100%",
-            height = "auto",
-            halign = "center",
-            textAlignment = "center",
             vmargin = 8,
         },
 
         -- Label section
         gui.Label{
+            classes = {"modalMessage"},
             text = "Label:",
             fontSize = 14,
             width = "100%",
-            height = "auto",
-            halign = "center",
             textAlignment = "center",
             vmargin = 8,
         },
@@ -294,11 +321,10 @@ local function ShowEditTimerDialog(timerId)
 
         -- Duration section
         gui.Label{
+            classes = {"modalMessage"},
             text = "Duration:",
             fontSize = 14,
             width = "100%",
-            height = "auto",
-            halign = "center",
             textAlignment = "center",
             vmargin = 8,
         },
@@ -326,14 +352,14 @@ local function ShowEditTimerDialog(timerId)
             halign = "center",
             vmargin = 16,
 
-            -- Delete button (red)
+            -- Delete button (themed-neutral; a composition class can't recolor a
+            -- button surface -- see the cascade gotcha note up top)
             gui.Button{
                 width = 80,
                 height = 36,
                 hmargin = 8,
-                text = "Delete",
                 fontSize = 14,
-                bgcolor = "#aa3333",
+                text = "Delete",
 
                 click = function(element)
                     DeleteTimer(timerId)
@@ -346,8 +372,8 @@ local function ShowEditTimerDialog(timerId)
                 width = 80,
                 height = 36,
                 hmargin = 8,
-                text = "Cancel",
                 fontSize = 14,
+                text = "Cancel",
 
                 click = function(element)
                     gui.CloseModal()
@@ -359,8 +385,8 @@ local function ShowEditTimerDialog(timerId)
                 width = 80,
                 height = 36,
                 hmargin = 8,
-                text = "Save",
                 fontSize = 14,
+                text = "Save",
 
                 click = function(element)
                     UpdateTimer(timerId, {
@@ -382,95 +408,76 @@ end
 --------------------------------------------------------------------------------
 
 -- Creates a timer cell and populates refs table for closure-based updates.
--- refs[timerId] = { displayLabel, visual } for live time updates without rebuild.
+-- refs[timerId] = { displayLabel, stopIcon, visual } for live updates.
 local function CreateTimerCell(timer, timerId, refs)
     local size = 80
     local state = GetTimerState(timer)
+    local running = (state == "running")
+    local expired = (state == "expired")
 
     -- Determine initial display text
     local displayText
-
-    if state == "expired" then
+    if expired then
         displayText = "Done!"
     else
         displayText = FormatDuration(timer.durationSeconds)
     end
 
-    local displayLabel = gui.Button{
+    -- Duration / state readout. A plain LABEL (not a button): a button carries
+    -- its own themed border+bg box, which -- being wider than the cell -- poked
+    -- out the cell's sides as stray lines. The whole cell is the click target
+    -- instead. Collapses (yields its space) while running.
+    local displayLabel = gui.Label{
+        classes = running and {"collapsed"} or {},
         text = displayText,
-        width = 84,
+        width = "100%",
         height = 36,
         fontSize = 18,
         bold = true,
         halign = "center",
         valign = "center",
-        classes = {state == "running" and "hidden" or "visible"},
-        styles = {
-            { selectors = {"hidden"}, collapsed = 1 },
-        },
-        click = function(element)
-            ToggleTimer(timerId)
-        end,
+        textAlignment = "center",
     }
 
-    -- Stop button shown when timer is running
-    local stopIcon = gui.Button{
+    -- Stop control shown while running. A PANEL (not a button) so the bgDanger
+    -- composition class actually recolors it. Clicks bubble to visualPanel.
+    local stopIcon = gui.Panel{
+        classes = running and {"bgDanger"} or {"bgDanger", "collapsed"},
         width = 28,
         height = 28,
         halign = "center",
         valign = "center",
-        bgcolor = "#cc3333",
         cornerRadius = 4,
-        text = "",
-        classes = {state == "running" and "visible" or "hidden"},
-        styles = {
-            { selectors = {"hidden"}, collapsed = 1 },
-        },
+    }
+
+    -- State accent on the cell frame: success (green) running, danger (red)
+    -- expired, neutral (@border) idle. `bordered` paints the themed surface +
+    -- border; the border-tint class overrides its border color. The whole cell
+    -- is the click target (hoverable gives the affordance).
+    local stateClass = (running and "borderSuccess") or (expired and "borderDanger") or nil
+
+    local visualPanel = gui.Panel{
+        classes = {"bordered", "hoverable", stateClass},
+        width = size,
+        height = 50,
+        halign = "center",
+        cornerRadius = 8,
+
         click = function(element)
             ToggleTimer(timerId)
         end,
-    }
-
-    local visualPanel = gui.Panel{
-        width = size,
-        height = size,
-        halign = "center",
-        bgcolor = "#333333",
-        borderWidth = 2,
-        borderColor = "#666666",
-        cornerRadius = 8,
-
-        classes = {state == "running" and "timer-running" or state == "expired" and "timer-expired" or "timer-idle"},
-
-        styles = {
-            {
-                selectors = {"timer-idle"},
-                bgcolor = "#333333",
-                borderColor = "#666666",
-            },
-            {
-                selectors = {"timer-running"},
-                bgcolor = "#2d5a2d",
-                borderColor = "#44cc44",
-            },
-            {
-                selectors = {"timer-expired"},
-                bgcolor = "#5a2d2d",
-                borderColor = "#663333",
-            },
-        },
 
         children = { displayLabel, stopIcon },
     }
 
-    -- Store refs for closure-based time updates
+    -- Store refs for closure-based updates
     refs[timerId] = {
         displayLabel = displayLabel,
         stopIcon = stopIcon,
         visual = visualPanel,
     }
 
-    -- Label (clickable to open editor)
+    -- Label (clickable to open editor; themed default text color)
     local labelElement = gui.Label{
         text = timer.label,
         fontSize = 12,
@@ -479,7 +486,6 @@ local function CreateTimerCell(timer, timerId, refs)
         halign = "center",
         textAlignment = "center",
         vmargin = 4,
-        color = "#e0e0e0",
 
         click = function(element)
             ShowEditTimerDialog(timerId)
@@ -550,15 +556,15 @@ local function CreateTimersPanel()
 
     local CELLS_PER_ROW = 3
 
+    -- Instructional helper text (themed muted)
     local noTimersLabel = gui.Label{
-        classes = {"collapsed"},
+        classes = {"collapsed", "fgMuted"},
         text = "Click + to create a new countdown timer. Click a timer's name to edit it, or the number to start/stop it.",
         fontSize = 14,
         width = "100%",
         height = "auto",
         halign = "center",
         textAlignment = "center",
-        color = "#e0e0e0",
         vmargin = 16,
     }
 
@@ -642,16 +648,16 @@ local function CreateTimersPanel()
             if timer then
                 local state = GetTimerState(timer)
                 local running = state == "running"
-                if state == "expired" then
+                local expired = state == "expired"
+                if expired then
                     refs.displayLabel.text = "Done!"
                 else
                     refs.displayLabel.text = FormatDuration(timer.durationSeconds)
                 end
-                refs.displayLabel:SetClass("hidden", running)
-                refs.stopIcon:SetClass("hidden", not running)
-                refs.visual:SetClass("timer-idle", state == "idle")
-                refs.visual:SetClass("timer-running", running)
-                refs.visual:SetClass("timer-expired", state == "expired")
+                refs.displayLabel:SetClass("collapsed", running)
+                refs.stopIcon:SetClass("collapsed", not running)
+                refs.visual:SetClass("borderSuccess", running)
+                refs.visual:SetClass("borderDanger", expired)
             end
         end
     end
@@ -758,8 +764,6 @@ local function CreateCountdownOverlay()
                 local remaining = state == "running" and (timer.endTime - dmhub.serverTime) or 0
                 local isExpired = state == "expired"
 
-                local barColor = isExpired and "#663333" or "#44cc44"
-                local textColor = isExpired and "#663333" or "#44cc44"
                 local displayText = isExpired and "TIME'S UP" or FormatTimeRemaining(remaining)
 
                 cards[#cards + 1] = gui.Panel{
@@ -767,19 +771,16 @@ local function CreateCountdownOverlay()
                     height = "auto",
                     flow = "vertical",
                     halign = "right",
-                    classes = {"framedPanel"},
-                    styles = { Styles.Panel },
+                    -- State accent lives on the CARD BORDER (success green /
+                    -- danger red) rather than a separate top bar -- a width=100%
+                    -- bar ignores hpad and read as a stray floating line.
+                    classes = {"framedPanel", isExpired and "borderDanger" or "borderSuccess"},
                     vpad = 16,
                     hpad = 20,
                     vmargin = 8,
 
                     children = {
-                        gui.Panel{
-                            width = "100%",
-                            height = 6,
-                            bgcolor = barColor,
-                            cornerRadius = 3,
-                        },
+                        -- Timer name (themed default text)
                         gui.Label{
                             width = "100%",
                             height = "auto",
@@ -788,10 +789,11 @@ local function CreateCountdownOverlay()
                             text = timer.label,
                             fontSize = 16,
                             bold = true,
-                            color = "#cccccc",
                             vmargin = 4,
                         },
+                        -- Countdown / TIME'S UP: success (green) or danger (red) text.
                         gui.Label{
+                            classes = isExpired and {"danger"} or {"success"},
                             width = "100%",
                             height = "auto",
                             halign = "center",
@@ -799,7 +801,6 @@ local function CreateCountdownOverlay()
                             text = displayText,
                             fontSize = 36,
                             bold = true,
-                            color = textColor,
                             vmargin = 4,
                         },
                     },
@@ -812,12 +813,24 @@ local function CreateCountdownOverlay()
             cardsContainer.children = {}
         else
             cardsContainer.children = cards
+            -- Re-resolve the theme when the overlay transitions to visible. The
+            -- overlay is built once at EnterGame, where the active theme may not
+            -- be resolved yet, so its initial snapshot can be the default
+            -- (unthemed). Reassigning on show guarantees it reflects the user's
+            -- current theme. Cheap: GetStyles is memoized per theme/scheme.
+            if overlayPanel:HasClass("hidden") then
+                overlayPanel.styles = ThemeEngine.GetStyles()
+            end
             overlayPanel:SetClass("hidden", false)
         end
     end
 
+    -- Full-screen overlay. Mounted on GameHud.dialogWorldPanel, OUTSIDE any
+    -- themed container, so it owns its own cascade root. `hidden` is a theme
+    -- utility class, so no custom styles block is needed.
     overlayPanel = gui.Panel{
         classes = {"timers-overlay", "hidden"},
+        styles = ThemeEngine.GetStyles(),
         width = "100%",
         height = "100%",
         halign = "center",
@@ -826,13 +839,6 @@ local function CreateCountdownOverlay()
 
         monitorGame = doc.path,
         thinkTime = 1,
-
-        styles = {
-            {
-                selectors = {"hidden"},
-                collapsed = 1,
-            },
-        },
 
         events = {
             refreshGame = function(element)
@@ -848,6 +854,14 @@ local function CreateCountdownOverlay()
             cardsContainer,
         },
     }
+
+    -- The overlay persists for the whole session; recolor it live on theme /
+    -- color-scheme switch. `mod` is passed so this auto-deregisters on unload.
+    ThemeEngine.OnThemeChanged(mod, function()
+        if overlayPanel ~= nil and overlayPanel.valid then
+            overlayPanel.styles = ThemeEngine.GetStyles()
+        end
+    end)
 
     return overlayPanel
 end
@@ -871,6 +885,12 @@ dmhub.RegisterEventHandler("EnterGame", function()
         if not overlayAdded then
             local overlay = CreateCountdownOverlay()
             GameHud.instance.dialogWorldPanel:AddChild(overlay)
+
+            -- Re-resolve the cascade now that the overlay is attached to the
+            -- live HUD tree. Styles assigned to a DETACHED panel resolve without
+            -- a live parent context; reassigning after AddChild forces a
+            -- re-cascade against the active theme.
+            overlay.styles = ThemeEngine.GetStyles()
             overlayAdded = true
         end
     end)
