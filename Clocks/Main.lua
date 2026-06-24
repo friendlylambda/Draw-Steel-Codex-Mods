@@ -236,8 +236,9 @@ local function ShowEditClockDialog(clockId)
         end,
     }
 
-    -- Slices display label
+    -- Slices display: themed bordered surface (no inline colors)
     local slicesLabel = gui.Label{
+        classes = {"bordered"},
         text = tostring(slicesInput),
         fontSize = 24,
         width = 60,
@@ -245,9 +246,6 @@ local function ShowEditClockDialog(clockId)
         halign = "center",
         valign = "center",
         textAlignment = "center",
-        bgcolor = "#333333",
-        borderWidth = 1,
-        borderColor = "#666666",
     }
 
     local decreaseButton = gui.Button{
@@ -288,29 +286,24 @@ local function ShowEditClockDialog(clockId)
         vpad = 16,
         hpad = 16,
 
-        styles = {
-            Styles.Panel,
-        },
+        -- This modal lives outside any themed container, so it owns its own
+        -- cascade root via ThemeEngine.GetStyles().
+        styles = ThemeEngine.GetStyles(),
 
         -- Title
         gui.Label{
+            classes = {"modalTitle"},
             text = "Edit Clock",
             fontSize = 20,
-            bold = true,
-            width = "100%",
-            height = "auto",
-            halign = "center",
-            textAlignment = "center",
             vmargin = 8,
         },
 
         -- Label section
         gui.Label{
+            classes = {"modalMessage"},
             text = "Label:",
             fontSize = 14,
             width = "100%",
-            height = "auto",
-            halign = "center",
             textAlignment = "center",
             vmargin = 8,
         },
@@ -319,11 +312,10 @@ local function ShowEditClockDialog(clockId)
 
         -- Slices section
         gui.Label{
+            classes = {"modalMessage"},
             text = "Slices:",
             fontSize = 14,
             width = "100%",
-            height = "auto",
-            halign = "center",
             textAlignment = "center",
             vmargin = 8,
         },
@@ -351,14 +343,14 @@ local function ShowEditClockDialog(clockId)
             halign = "center",
             vmargin = 16,
 
-            -- Delete button (red)
+            -- Delete button (themed-neutral; a composition class can't recolor
+            -- a button surface)
             gui.Button{
                 width = 80,
                 height = 36,
                 hmargin = 4,
                 text = "Delete",
                 fontSize = 14,
-                bgcolor = "#aa3333",
 
                 click = function(element)
                     DeleteClock(clockId)
@@ -400,7 +392,9 @@ local function ShowEditClockDialog(clockId)
         },
 
         -- Close button (X)
-        gui.CloseButton{
+        gui.Button{
+            classes = {"closeButton"},
+            floating = true,
             halign = "right",
             valign = "top",
             escapePriority = EscapePriority.EXIT_MODAL_DIALOG,
