@@ -211,9 +211,12 @@ local function ShouldTrigger(cfg)
     return true, "Session start detected"
 end
 
--- Apply a refill now and stamp the action time.
+-- Apply a refill now and stamp the action time. The refill only ever tops the
+-- pool up: we set to the max of the current count and the configured amount, so
+-- a party that already has more tokens than the refill value never loses any.
 local function ApplyRefill(amount, note)
-    SetHeroTokens(amount, note or "Auto Hero Token Refill (session start)")
+    local target = math.max(GetHeroTokens(), amount)
+    SetHeroTokens(target, note or "Auto Hero Token Refill (session start)")
     RecordAction()
 end
 
