@@ -257,7 +257,7 @@ local function ShowEditClockDialog(clockId)
         fontSize = 24,
 
         click = function(element)
-            slicesInput = math.max(3, slicesInput - 1)
+            slicesInput = math.max(1, slicesInput - 1)
             slicesLabel.text = tostring(slicesInput)
         end,
     }
