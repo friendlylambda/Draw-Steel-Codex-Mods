@@ -141,6 +141,7 @@ local function CreateNewTimer()
         label = "New Timer",
         durationSeconds = 60,
         triggerType = "manual",
+        playerTriggerable = false,
         endTime = nil,
     }
 
@@ -202,6 +203,10 @@ local function ToggleTimer(timerId)
     end
 
     local timer = doc.data.timers[timerId]
+    if not dmhub.isDM and not timer.playerTriggerable then
+        return
+    end
+
     doc:BeginChange()
 
     if timer.endTime ~= nil then
@@ -230,6 +235,7 @@ local function ShowEditTimerDialog(timerId)
     local timer = doc.data.timers[timerId]
     local labelInput = timer.label
     local durationInput = timer.durationSeconds
+    local playerTriggerableInput = timer.playerTriggerable or false
 
     -- Label input field (themed via the modal's cascade root)
     local labelField = gui.Input{
@@ -344,6 +350,18 @@ local function ShowEditTimerDialog(timerId)
             },
         },
 
+        -- Lets players see this timer in their panel and start/stop it
+        gui.Check{
+            text = "Players can trigger",
+            value = playerTriggerableInput,
+            halign = "center",
+            vmargin = 8,
+
+            change = function(element)
+                playerTriggerableInput = element.value
+            end,
+        },
+
         -- Button row
         gui.Panel{
             width = "100%",
@@ -392,6 +410,7 @@ local function ShowEditTimerDialog(timerId)
                     UpdateTimer(timerId, {
                         label = labelInput,
                         durationSeconds = durationInput,
+                        playerTriggerable = playerTriggerableInput,
                     })
                     gui.CloseModal()
                 end,
@@ -409,7 +428,7 @@ end
 
 -- Creates a timer cell and populates refs table for closure-based updates.
 -- refs[timerId] = { displayLabel, stopIcon, visual } for live updates.
-local function CreateTimerCell(timer, timerId, refs)
+local function CreateTimerCell(timer, timerId, refs, isDM)
     local size = 80
     local state = GetTimerState(timer)
     local running = (state == "running")
@@ -477,7 +496,7 @@ local function CreateTimerCell(timer, timerId, refs)
         visual = visualPanel,
     }
 
-    -- Label (clickable to open editor; themed default text color)
+    -- Label (clickable to open editor for the GM; themed default text color)
     local labelElement = gui.Label{
         text = timer.label,
         fontSize = 12,
@@ -487,9 +506,9 @@ local function CreateTimerCell(timer, timerId, refs)
         textAlignment = "center",
         vmargin = 4,
 
-        click = function(element)
+        click = isDM and function(element)
             ShowEditTimerDialog(timerId)
-        end,
+        end or nil,
     }
 
     return gui.Panel{
@@ -535,12 +554,13 @@ local function CreateAddButton()
 end
 
 --------------------------------------------------------------------------------
--- MAIN PANEL (GM-only)
+-- MAIN PANEL (GM sees all timers; players see only player-triggerable ones)
 --------------------------------------------------------------------------------
 
 local function CreateTimersPanel()
     local doc = GetTimersDoc()
     local lastStructureHash = "__uninitialized__"
+    local isDM = dmhub.isDM
 
     DebugLog("CreateTimersPanel: doc.path = " .. tostring(doc.path))
 
@@ -559,7 +579,9 @@ local function CreateTimersPanel()
     -- Instructional helper text (themed muted)
     local noTimersLabel = gui.Label{
         classes = {"collapsed", "fgMuted"},
-        text = "Click + to create a new countdown timer. Click a timer's name to edit it, or the number to start/stop it.",
+        text = isDM
+            and "Click + to create a new countdown timer. Click a timer's name to edit it, or the number to start/stop it."
+            or "No timers available.",
         fontSize = 14,
         width = "100%",
         height = "auto",
@@ -582,9 +604,10 @@ local function CreateTimersPanel()
         for _, timerId in ipairs(docData.timerOrder or {}) do
             local timer = docData.timers[timerId]
             if timer then
-                parts[#parts + 1] = string.format("%s:%s:%d:%s",
+                parts[#parts + 1] = string.format("%s:%s:%d:%s:%s",
                     timerId, timer.label or "", timer.durationSeconds or 0,
-                    tostring(timer.endTime or "nil"))
+                    tostring(timer.endTime or "nil"),
+                    tostring(timer.playerTriggerable or false))
             end
         end
         return table.concat(parts, "|")
@@ -598,14 +621,18 @@ local function CreateTimersPanel()
         if docData and docData.timerOrder then
             for _, timerId in ipairs(docData.timerOrder) do
                 local timer = docData.timers[timerId]
-                if timer then
-                    local cell = CreateTimerCell(timer, timerId, timerRefs)
+                if timer and (isDM or timer.playerTriggerable) then
+                    local cell = CreateTimerCell(timer, timerId, timerRefs, isDM)
                     cells[#cells + 1] = cell
                 end
             end
         end
 
-        cells[#cells + 1] = CreateAddButton()
+        local timerCount = #cells
+
+        if isDM then
+            cells[#cells + 1] = CreateAddButton()
+        end
 
         local rows = {}
         local currentRowCells = {}
@@ -635,7 +662,7 @@ local function CreateTimersPanel()
             }
         end
 
-        return rows, #cells - 1  -- subtract 1 for the add button
+        return rows, timerCount
     end
 
     -- Update counters with the correct ui (formatted duration or stop button)
@@ -721,7 +748,7 @@ end
 DockablePanel.Register{
     name = "Countdown Timers",
     icon = mod.images["panel-icon"],
-    dmonly = true,
+    dmonly = false,
     minHeight = 150,
     vscroll = true,
     content = function()

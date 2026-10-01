@@ -2,7 +2,7 @@
 
 ## What This Mod Does
 
-Configurable countdown timers for DMHub. The GM creates named timers with a duration, then triggers them manually by clicking. Running timers display as overlay notifications (visible to all players) in the upper-right corner, counting down in real time. When a timer expires it shows "TIME'S UP" until the GM resets it.
+Configurable countdown timers for DMHub. The GM creates named timers with a duration, then triggers them manually by clicking. A timer marked "Players can trigger" also appears in players' panels, where they can start/stop it. Running timers display as overlay notifications (visible to all players) in the upper-right corner, counting down in real time. When a timer expires it shows "TIME'S UP" until the GM resets it.
 
 ## Architecture
 
@@ -11,9 +11,9 @@ Single file mod: `Main.lua`
 ### Components
 
 - **Document System** (`timers:state`) - Stores all timer data: labels, durations, trigger type, and runtime end times. Synced across all clients.
-- **DockablePanel** ("Countdown Timers", GM-only) - Sidebar panel showing a grid of timer cells. Each displays the duration (idle), live countdown (running), or "Done!" (expired). Click the visual to start/stop. Click the label to edit. Plus button to add new timers.
+- **DockablePanel** ("Countdown Timers", visible to everyone) - Sidebar panel showing a grid of timer cells. The GM sees every timer plus the + button and can edit; players see only timers with `playerTriggerable` set, and can only start/stop them (no editing or creating). Each displays the duration (idle), live countdown (running), or "Done!" (expired). Click the visual to start/stop. Click the label to edit. Plus button to add new timers.
 - **Countdown Overlay** - Attached to `dialogWorldPanel` (above map, below modals). Shows all running/expired timers as stacked notification cards in the upper-right corner. Visible to all players. Updates every second via `thinkTime`. Each user can drag the card stack anywhere on screen (`cardsContainer` is `draggable`; the offset is client-local, not synced, and resets each session). Dropping it within `OVERLAY_SNAP_DISTANCE` px of the top-right home position snaps it back to (0, 0).
-- **Edit Dialog** - Modal for GM to rename timers, change duration (30 seconds to 120 minutes, in 30-second steps), or delete.
+- **Edit Dialog** - Modal for GM to rename timers, change duration (30 seconds to 120 minutes, in 30-second steps), toggle "Players can trigger", or delete.
 
 ### Data Model
 
@@ -22,6 +22,7 @@ doc.data.timers[timerId] = {
     label = "Short Rest",       -- Display name
     durationSeconds = 600,      -- Configured duration in seconds (30-7200, 30s steps; new timers default 60)
     triggerType = "manual",     -- Trigger condition (only "manual" for now)
+    playerTriggerable = false,  -- true = players see it in their panel and can start/stop it (nil = false)
     endTime = nil,              -- dmhub.serverTime when timer expires; nil = not running
 }
 doc.data.timerOrder = { "timer_1", "timer_2", ... }
@@ -48,6 +49,10 @@ Colors are theme-driven (Codex Theme Engine), not hardcoded -- they track the us
 | Idle | Duration (e.g. "10m") | Hidden | Neutral (`@border`) |
 | Running | Countdown (e.g. "5:23") | Visible with countdown | Success / green (`borderSuccess` cell, `bgSuccess` bar) |
 | Expired | "Done!" | Visible with "TIME'S UP" | Danger / red (`borderDanger` cell, `bgDanger` bar + `danger` text) |
+
+### Player Interactions (Panel)
+
+- **Click timer visual** on a player-triggerable timer - Start/stop it. Players write the shared doc directly (same as Safety Cards); `ToggleTimer` also refuses non-triggerable timers on player clients.
 
 ### GM Interactions (Panel)
 
