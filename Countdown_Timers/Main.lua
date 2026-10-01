@@ -733,12 +733,26 @@ DockablePanel.Register{
 -- COUNTDOWN OVERLAY (visible to all players)
 --------------------------------------------------------------------------------
 
+-- Drop within this many pixels (on each axis) of the home position and the
+-- cards snap back into their original top-right spot.
+local OVERLAY_SNAP_DISTANCE = 60
+
 local function CreateCountdownOverlay()
     local doc = GetTimersDoc()
 
     local overlayPanel
 
+    -- The card stack is draggable anywhere on screen. x/y are offsets from its
+    -- laid-out (top-right) position, so home is (0, 0). The offset is local to
+    -- this client only -- it is never written to the shared document.
+    --
+    -- Hit-testing: a panel only receives mouse input if it has a bgimage, so
+    -- the container gets one (tinted clear via the theme's `transparent` class)
+    -- and the cards inside are `interactable = false` so a press anywhere on
+    -- the stack lands on the container instead of being swallowed by a card.
     local cardsContainer = gui.Panel{
+        classes = {"transparent"},
+        bgimage = true,
         width = 280,
         height = "auto",
         flow = "vertical",
@@ -746,25 +760,91 @@ local function CreateCountdownOverlay()
         valign = "top",
         hmargin = 20,
         vmargin = 20,
+
+        draggable = true,
+        drag = function(element)
+            local x = element.xdrag
+            local y = element.ydrag
+            if math.abs(x) < OVERLAY_SNAP_DISTANCE and math.abs(y) < OVERLAY_SNAP_DISTANCE then
+                x = 0
+                y = 0
+            end
+            element.x = x
+            element.y = y
+        end,
     }
+
+    -- Two-tier update (same as the GM panel): cards are only rebuilt when the
+    -- set of active timers, their labels, or running/expired state changes.
+    -- Every other tick just rewrites the countdown text via closure refs, so
+    -- the cards aren't destroyed out from under an in-progress drag.
+    local lastCardsHash = "__uninitialized__"
+    local countdownRefs = {}
+
+    local function buildCardsHash(data)
+        local parts = {}
+        for _, timerId in ipairs(data.timerOrder or {}) do
+            local timer = data.timers[timerId]
+            if timer and timer.endTime ~= nil then
+                parts[#parts + 1] = string.format("%s:%s:%s",
+                    timerId, timer.label or "", GetTimerState(timer))
+            end
+        end
+        return table.concat(parts, "|")
+    end
+
+    local function countdownText(timer)
+        if GetTimerState(timer) == "expired" then
+            return "TIME'S UP"
+        end
+        return FormatTimeRemaining(timer.endTime - dmhub.serverTime)
+    end
 
     local function rebuildCards()
         local currentDoc = GetTimersDoc()
         if currentDoc.data == nil or currentDoc.data.timers == nil then
             overlayPanel:SetClass("hidden", true)
             cardsContainer.children = {}
+            countdownRefs = {}
+            lastCardsHash = ""
             return
         end
 
-        local cards = {}
-        for _, timerId in ipairs(currentDoc.data.timerOrder or {}) do
-            local timer = currentDoc.data.timers[timerId]
-            if timer and timer.endTime ~= nil then
-                local state = GetTimerState(timer)
-                local remaining = state == "running" and (timer.endTime - dmhub.serverTime) or 0
-                local isExpired = state == "expired"
+        local data = currentDoc.data
+        local hash = buildCardsHash(data)
 
-                local displayText = isExpired and "TIME'S UP" or FormatTimeRemaining(remaining)
+        if hash == lastCardsHash then
+            for timerId, countdownLabel in pairs(countdownRefs) do
+                local timer = data.timers[timerId]
+                if timer and timer.endTime ~= nil and countdownLabel.valid then
+                    countdownLabel.text = countdownText(timer)
+                end
+            end
+            return
+        end
+        lastCardsHash = hash
+
+        countdownRefs = {}
+        local cards = {}
+        for _, timerId in ipairs(data.timerOrder or {}) do
+            local timer = data.timers[timerId]
+            if timer and timer.endTime ~= nil then
+                local isExpired = GetTimerState(timer) == "expired"
+
+                -- Countdown / TIME'S UP: success (green) or danger (red) text.
+                local countdownLabel = gui.Label{
+                    classes = isExpired and {"danger"} or {"success"},
+                    interactable = false,
+                    width = "100%",
+                    height = "auto",
+                    halign = "center",
+                    textAlignment = "center",
+                    text = countdownText(timer),
+                    fontSize = 36,
+                    bold = true,
+                    vmargin = 4,
+                }
+                countdownRefs[timerId] = countdownLabel
 
                 cards[#cards + 1] = gui.Panel{
                     width = 280,
@@ -775,6 +855,7 @@ local function CreateCountdownOverlay()
                     -- danger red) rather than a separate top bar -- a width=100%
                     -- bar ignores hpad and read as a stray floating line.
                     classes = {"framedPanel", isExpired and "borderDanger" or "borderSuccess"},
+                    interactable = false,
                     vpad = 16,
                     hpad = 20,
                     vmargin = 8,
@@ -782,6 +863,7 @@ local function CreateCountdownOverlay()
                     children = {
                         -- Timer name (themed default text)
                         gui.Label{
+                            interactable = false,
                             width = "100%",
                             height = "auto",
                             halign = "center",
@@ -791,18 +873,7 @@ local function CreateCountdownOverlay()
                             bold = true,
                             vmargin = 4,
                         },
-                        -- Countdown / TIME'S UP: success (green) or danger (red) text.
-                        gui.Label{
-                            classes = isExpired and {"danger"} or {"success"},
-                            width = "100%",
-                            height = "auto",
-                            halign = "center",
-                            textAlignment = "center",
-                            text = displayText,
-                            fontSize = 36,
-                            bold = true,
-                            vmargin = 4,
-                        },
+                        countdownLabel,
                     },
                 }
             end

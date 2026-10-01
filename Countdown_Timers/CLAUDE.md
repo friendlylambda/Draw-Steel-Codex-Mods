@@ -12,7 +12,7 @@ Single file mod: `Main.lua`
 
 - **Document System** (`timers:state`) - Stores all timer data: labels, durations, trigger type, and runtime end times. Synced across all clients.
 - **DockablePanel** ("Countdown Timers", GM-only) - Sidebar panel showing a grid of timer cells. Each displays the duration (idle), live countdown (running), or "Done!" (expired). Click the visual to start/stop. Click the label to edit. Plus button to add new timers.
-- **Countdown Overlay** - Attached to `dialogWorldPanel` (above map, below modals). Shows all running/expired timers as stacked notification cards in the upper-right corner. Visible to all players. Updates every second via `thinkTime`.
+- **Countdown Overlay** - Attached to `dialogWorldPanel` (above map, below modals). Shows all running/expired timers as stacked notification cards in the upper-right corner. Visible to all players. Updates every second via `thinkTime`. Each user can drag the card stack anywhere on screen (`cardsContainer` is `draggable`; the offset is client-local, not synced, and resets each session). Dropping it within `OVERLAY_SNAP_DISTANCE` px of the top-right home position snaps it back to (0, 0).
 - **Edit Dialog** - Modal for GM to rename timers, change duration (30 seconds to 120 minutes, in 30-second steps), or delete.
 
 ### Data Model
