@@ -475,6 +475,24 @@ local function CreateTimerCell(timer, timerId, refs, isDM)
     -- is the click target (hoverable gives the affordance).
     local stateClass = (running and "borderSuccess") or (expired and "borderDanger") or nil
 
+    -- GM-only corner badge marking timers players can see and trigger. Same eye
+    -- glyph Clocks uses for "visible to players"; bgFgMuted tints it to the
+    -- theme's muted foreground. Floating, so it doesn't shift the cell layout.
+    local playerBadge = nil
+    if isDM and timer.playerTriggerable then
+        playerBadge = gui.Panel{
+            classes = {"bgFgMuted"},
+            bgimage = "ui-icons/eye.png",
+            width = 14,
+            height = 14,
+            halign = "right",
+            valign = "top",
+            floating = true,
+            x = -4,
+            y = 4,
+        }
+    end
+
     local visualPanel = gui.Panel{
         classes = {"bordered", "hoverable", stateClass},
         width = size,
@@ -486,7 +504,7 @@ local function CreateTimerCell(timer, timerId, refs, isDM)
             ToggleTimer(timerId)
         end,
 
-        children = { displayLabel, stopIcon },
+        children = { displayLabel, stopIcon, playerBadge },
     }
 
     -- Store refs for closure-based updates
